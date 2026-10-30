@@ -1,0 +1,25 @@
+{
+  "device": {
+    "name": "Momo",
+    "udid": "00008110-0000000000000001"
+  },
+  "thresholdDays": 4,
+  "apps": [
+    {
+      "id": "trace",
+      "name": "Trace",
+      "repo": "~/code/projects/Trace",
+      "project": "Trace.xcodeproj",
+      "scheme": "Trace",
+      "bundleId": "org.mnalavadi.Trace"
+    },
+    {
+      "id": "usc",
+      "name": "Urban Sports Club",
+      "repo": "~/code/projects/UrbanSportsClub",
+      "project": "Urban Sports Club.xcodeproj",
+      "scheme": "Urban Sports Club",
+      "bundleId": "mnalavadi.Urban-Sports-Club"
+    }
+  ]
+}
