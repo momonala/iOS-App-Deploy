@@ -144,3 +144,31 @@ func deploysAtOrUnderTheThreshold(daysLeft: Double, expected: Bool) {
     #expect(profiles.newest(for: "mnalavadi.Trace")?.expirationDate == ISO8601DateFormatter().date(from: "2026-11-06T10:10:57Z"))
     #expect(profiles.newestExtensions(of: "mnalavadi.Trace").map(\.uuid) == ["widget"])
 }
+
+@Test(arguments: [
+    (day - 1, true),
+    (day, true),
+    (day + 1, false),
+])
+func urgentWithinADayOfExpiry(secondsLeft: TimeInterval, expected: Bool) {
+    #expect(Policy.isUrgent(expiresAt: now + secondsLeft, now: now) == expected)
+}
+
+@Test func stateSurvivesASaveAndLoadWithISO8601Dates() throws {
+    let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = StateStore(url: directory.appending(path: "state.json"))
+    var state = PersistedState()
+    state.lastSuccessfulCheck = now
+    state.apps["mnalavadi.Trace"] = {
+        var run = RunState()
+        run.failureNotified = true
+        run.urgentNotifiedExpiry = now + day
+        return run
+    }()
+
+    try store.save(state)
+
+    #expect(try String(contentsOf: store.url, encoding: .utf8).contains(#""lastSuccessfulCheck" : "2026-10-30T10:00:00Z""#))
+    #expect(store.load() == state)
+}
