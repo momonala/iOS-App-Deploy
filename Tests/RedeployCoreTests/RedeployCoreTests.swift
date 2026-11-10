@@ -28,7 +28,9 @@ private let day: TimeInterval = 86400
 
 @Test(arguments: [
     (5.0, false),
+    (4.0 + 1 / 86400, false),
     (4.0, true),
+    (-1.0, true),
 ])
 func deploysAtOrUnderTheThreshold(daysLeft: Double, expected: Bool) {
     #expect(Policy.needsDeploy(expiresAt: now + daysLeft * day, now: now, thresholdDays: 4) == expected)
@@ -86,6 +88,7 @@ func deploysAtOrUnderTheThreshold(daysLeft: Double, expected: Bool) {
     let battery = try BatterySnapshot.decode(Data(json.utf8), readAt: now)
 
     #expect(battery.healthPercent == 77)
+    #expect(battery.cycleCount == 1407)
     #expect(battery.chargerWatts == 15)
     #expect(battery.temperatureCelsius == 24.59)
 }
