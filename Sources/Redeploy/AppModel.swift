@@ -23,6 +23,10 @@ enum Phone: Equatable {
 
 enum OnPhone: Equatable {
     case unknown, installed(String), notInstalled, unavailable
+
+    var isInstalled: Bool {
+        if case .installed = self { true } else { false }
+    }
 }
 
 struct AppStatus: Identifiable {

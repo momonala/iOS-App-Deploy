@@ -453,10 +453,10 @@ private struct AppDetail: View {
     }
 
     private var installedText: String {
-        switch app.onPhone.last {
+        if app.onPhone.isReading, !app.onPhone.last.isInstalled { return "Checking…" }
+        return switch app.onPhone.last {
         case .installed(let version): version
         case .unknown: "Checking…"
-        case _ where app.onPhone.isReading: "Checking…"
         case .notInstalled: "Not installed"
         case .unavailable: "Phone not reachable"
         }
