@@ -22,7 +22,7 @@ enum Phone: Equatable {
 }
 
 enum OnPhone: Equatable {
-    case unknown, checking, installed(String), notInstalled, unavailable
+    case unknown, installed(String), notInstalled, unavailable
 }
 
 struct AppStatus: Identifiable {
@@ -33,7 +33,7 @@ struct AppStatus: Identifiable {
     var extensionProfiles: [InstalledProfile] = []
     var crashes: [CrashReport] = []
     var phase: Phase = .idle
-    var onPhone: OnPhone = .unknown
+    var onPhone: SourceState<OnPhone> = .idle(.unknown)
     var lastLog: URL?
     var iconURL: URL?
     var icon: NSImage?
@@ -58,7 +58,7 @@ final class AppModel {
     private(set) var launchAtLogin = false
     private(set) var phoneDetails: PhoneDetails?
     private(set) var lockState: LockState?
-    private(set) var wifiSyncProblem: String?
+    private(set) var wifiSync: SourceState<WiFiSync> = .idle(.unknown)
     private(set) var pullingCrash: String?
     private(set) var crashCopyErrors: [String: String] = [:]
 
@@ -67,9 +67,7 @@ final class AppModel {
     @ObservationIgnored private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var pendingCheck: Task<Void, Never>?
-    @ObservationIgnored private var isReadingWiFiSync = false
-    @ObservationIgnored private var isReadingCrashes = false
-    @ObservationIgnored private var refreshingOnPhone: Set<String> = []
+    @ObservationIgnored private var crashList: SourceState<Void> = .idle(())
     @ObservationIgnored private let logger = Logger(subsystem: "mnalavadi.Redeploy", category: "model")
 
     init(store: StateStore = StateStore(), notifier: Notifier) {
@@ -200,10 +198,8 @@ final class AppModel {
     }
 
     func refreshOnPhone(_ id: String) async {
-        guard let config, let index = index(of: id), !refreshingOnPhone.contains(id) else { return }
-        refreshingOnPhone.insert(id)
-        defer { refreshingOnPhone.remove(id) }
-        if case .installed = apps[index].onPhone {} else { apps[index].onPhone = .checking }
+        guard let config, let index = index(of: id), let reading = apps[index].onPhone.beginning() else { return }
+        apps[index].onPhone = reading
         let json = Self.temporaryJSON()
         defer { try? FileManager.default.removeItem(at: json) }
         let status = await ProcessRunner.status(Paths.xcrun, [
@@ -212,9 +208,9 @@ final class AppModel {
         ])
         guard let index = self.index(of: id) else { return }
         if status == 0, let list = try? InstalledAppList.decode(Data(contentsOf: json)) {
-            apps[index].onPhone = list.version.map(OnPhone.installed) ?? .notInstalled
+            apps[index].onPhone = .idle(list.version.map(OnPhone.installed) ?? .notInstalled)
         } else {
-            apps[index].onPhone = .unavailable
+            apps[index].onPhone = .idle(.unavailable)
         }
     }
 
@@ -232,13 +228,12 @@ final class AppModel {
     /// Battery and installed profiles. Reachable only while macOS's Wi-Fi sync (usbmux) can see the
     /// phone, which comes and goes, so the last good readings are kept and shown with their time.
     func refreshWiFiSync() async {
-        guard let config, !isReadingWiFiSync else { return }
+        guard let config, let reading = wifiSync.beginning() else { return }
         guard FileManager.default.isExecutableFile(atPath: Paths.pymobiledevice3.path) else {
-            wifiSyncProblem = "Needs pymobiledevice3: uv tool install pymobiledevice3"
+            wifiSync = .idle(.missingTool)
             return
         }
-        isReadingWiFiSync = true
-        defer { isReadingWiFiSync = false }
+        wifiSync = reading
 
         let udid = ["--udid", config.device.udid]
         async let battery = ProcessRunner.output(Paths.pymobiledevice3, ["diagnostics", "battery", "single"] + udid)
@@ -251,15 +246,15 @@ final class AppModel {
         let installed = profilesStatus == 0 ? try? InstalledProfile.decode(Data(profilesJSON.utf8)) : nil
         if let snapshot { state.battery = snapshot }
         if let installed { state.installedProfiles = Reading(readAt: readAt, value: installed) }
-        wifiSyncProblem = snapshot != nil && installed != nil ? nil : "Not visible to Wi-Fi sync right now"
+        wifiSync = .idle(WiFiSync(batteryRead: snapshot != nil, profilesRead: installed != nil))
         save()
         reload()
     }
 
     func refreshCrashes() async {
-        guard let config, !isReadingCrashes else { return }
-        isReadingCrashes = true
-        defer { isReadingCrashes = false }
+        guard let config, let reading = crashList.beginning() else { return }
+        crashList = reading
+        defer { crashList = .idle(()) }
         let readAt = Date.now
         let json = await Self.devicectlJSON([
             "device", "info", "files", "--device", config.device.udid, "--domain-type", "systemCrashLogs",

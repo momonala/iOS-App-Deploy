@@ -453,9 +453,10 @@ private struct AppDetail: View {
     }
 
     private var installedText: String {
-        switch app.onPhone {
-        case .unknown, .checking: "Checking…"
+        switch app.onPhone.last {
         case .installed(let version): version
+        case .unknown: "Checking…"
+        case _ where app.onPhone.isReading: "Checking…"
         case .notInstalled: "Not installed"
         case .unavailable: "Phone not reachable"
         }
@@ -535,11 +536,11 @@ private struct PhoneDetail: View {
                 Text(battery.temperatureCelsius.formatted(.number.precision(.fractionLength(1))) + " °C")
             }
             DetailRow("Read", nested: true) {
-                Text(Format.relativeDateTime(battery.readAt) + (model.wifiSyncProblem == nil ? "" : " · not visible now"))
+                Text(Format.relativeDateTime(battery.readAt) + (model.wifiSync.last.problem == nil ? "" : " · not visible now"))
                     .foregroundStyle(.secondary)
             }
         } else {
-            DetailRow("Battery") { Text(model.wifiSyncProblem ?? "Reading…").foregroundStyle(.secondary) }
+            DetailRow("Battery") { Text(model.wifiSync.last.problem ?? "Reading…").foregroundStyle(.secondary) }
         }
     }
 

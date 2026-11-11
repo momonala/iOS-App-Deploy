@@ -365,3 +365,29 @@ func reloadRedrawsSettledPhasesFromTheSavedFailure(_ phase: Phase) {
     #expect(phase.merging(persisted: .phoneUnreachable) == .idle)
     #expect(phase.merging(persisted: nil) == .idle)
 }
+
+@Test func aSourceStartsOneReadAtATimeAndKeepsItsLastOutcome() throws {
+    let settled = SourceState.idle(WiFiSync.notVisible)
+    let reading = try #require(settled.beginning())
+
+    #expect(reading == .reading(.notVisible))
+    #expect(reading.isReading && reading.last == .notVisible)
+    #expect(reading.beginning() == nil)
+}
+
+@Test(arguments: [
+    (true, true, WiFiSync.visible),
+    (true, false, .notVisible),
+    (false, true, .notVisible),
+    (false, false, .notVisible),
+])
+func wiFiSyncIsVisibleOnlyWhenBothReadsSucceed(battery: Bool, profiles: Bool, expected: WiFiSync) {
+    #expect(WiFiSync(batteryRead: battery, profilesRead: profiles) == expected)
+}
+
+@Test func wiFiSyncProblems() {
+    #expect(WiFiSync.unknown.problem == nil)
+    #expect(WiFiSync.visible.problem == nil)
+    #expect(WiFiSync.notVisible.problem == "Not visible to Wi-Fi sync right now")
+    #expect(WiFiSync.missingTool.problem == "Needs pymobiledevice3: uv tool install pymobiledevice3")
+}
