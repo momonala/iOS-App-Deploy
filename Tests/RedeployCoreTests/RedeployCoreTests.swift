@@ -163,15 +163,130 @@ func urgentWithinADayOfExpiry(secondsLeft: TimeInterval, expected: Bool) {
     let store = StateStore(url: directory.appending(path: "state.json"))
     var state = PersistedState()
     state.lastSuccessfulCheck = now
-    state.apps["mnalavadi.Trace"] = {
-        var run = RunState()
-        run.failureNotified = true
-        run.urgentNotifiedExpiry = now + day
-        return run
-    }()
+    state.apps["mnalavadi.Trace"] = RunState(health: .urgent(notifiedExpiry: now + day, failure: .phoneUnreachable))
 
     try store.save(state)
 
     #expect(try String(contentsOf: store.url, encoding: .utf8).contains(#""lastSuccessfulCheck" : "2026-10-30T10:00:00Z""#))
     #expect(store.load() == state)
+}
+
+@Test func stateWrittenByTheFlagBasedBuildLoadsAndSavesUnchanged() throws {
+    let legacy = """
+    {
+      "apps" : {
+        "failed" : {
+          "failureNotified" : true,
+          "lastError" : "install failed after 3 attempts",
+          "lastErrorAt" : "2026-10-30T09:00:00Z",
+          "lastLog" : "/logs/failed.log",
+          "urgentNotifiedExpiry" : "2026-10-31T08:00:00Z"
+        },
+        "trace" : {
+          "failureNotified" : false,
+          "lastLog" : "/logs/trace.log"
+        },
+        "unreachable" : {
+          "failureNotified" : true
+        },
+        "urgentOnly" : {
+          "failureNotified" : false,
+          "urgentNotifiedExpiry" : "2026-10-31T08:00:00Z"
+        }
+      },
+      "battery" : {
+        "chargePercent" : 100,
+        "chargerWatts" : 15,
+        "cycleCount" : 1411,
+        "designCapacity" : 3208,
+        "fullChargeCapacity" : 2478,
+        "isCharging" : false,
+        "readAt" : "2026-11-04T12:04:49Z",
+        "temperatureCelsius" : 21.59
+      },
+      "lastCheck" : "2026-11-10T23:31:32Z",
+      "lastSuccessfulCheck" : "2026-11-10T23:31:32Z"
+    }
+    """
+    let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = StateStore(url: directory.appending(path: "state.json"))
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try Data(legacy.utf8).write(to: store.url)
+    let date = { ISO8601DateFormatter().date(from: $0)! }
+
+    let state = store.load()
+
+    #expect(state.lastCheck == date("2026-11-10T23:31:32Z"))
+    #expect(state.battery?.cycleCount == 1411)
+    #expect(state.apps == [
+        "trace": RunState(lastLog: "/logs/trace.log", health: .healthy),
+        "unreachable": RunState(health: .failing(.phoneUnreachable)),
+        "urgentOnly": RunState(health: .urgent(notifiedExpiry: date("2026-10-31T08:00:00Z"), failure: nil)),
+        "failed": RunState(lastLog: "/logs/failed.log", health: .urgent(
+            notifiedExpiry: date("2026-10-31T08:00:00Z"),
+            failure: .deployFailed(message: "install failed after 3 attempts", at: date("2026-10-30T09:00:00Z"))
+        )),
+    ])
+
+    try store.save(state)
+
+    func json(_ data: Data) throws -> NSDictionary {
+        try #require(JSONSerialization.jsonObject(with: data) as? NSDictionary)
+    }
+    #expect(try json(Data(contentsOf: store.url)) == json(Data(legacy.utf8)))
+}
+
+private let expiry = now + day / 2
+private let deployError = Failure.deployFailed(message: "install failed", at: now)
+
+@Test(arguments: [
+    AppHealth.healthy,
+    .failing(.phoneUnreachable),
+    .urgent(notifiedExpiry: expiry, failure: deployError),
+])
+func successStartsOverWithoutNotifying(from health: AppHealth) {
+    #expect(health.applying(.deploySucceeded) == (.healthy, false))
+}
+
+@Test func firstFailureNotifiesAndLaterFailuresOnlyUpdateTheError() {
+    let failed = AppHealth.healthy.applying(.deployFailed(message: "install failed", at: now))
+    #expect(failed == (.failing(deployError), true))
+
+    let again = AppHealth.failing(.phoneUnreachable).applying(.deployFailed(message: "install failed", at: now))
+    #expect(again == (.failing(deployError), false))
+}
+
+@Test func unreachablePhoneNotifiesOnceAndKeepsAnEarlierDeployError() {
+    #expect(AppHealth.healthy.applying(.phoneUnreachable) == (.failing(.phoneUnreachable), true))
+    #expect(AppHealth.failing(.phoneUnreachable).applying(.phoneUnreachable) == (.failing(.phoneUnreachable), false))
+    #expect(AppHealth.failing(deployError).applying(.phoneUnreachable) == (.failing(deployError), false))
+}
+
+@Test func failuresKeepTheUrgentNotice() {
+    let urgent = AppHealth.urgent(notifiedExpiry: expiry, failure: nil)
+    #expect(urgent.applying(.phoneUnreachable) == (.urgent(notifiedExpiry: expiry, failure: .phoneUnreachable), true))
+    #expect(urgent.applying(.deployFailed(message: "install failed", at: now))
+        == (.urgent(notifiedExpiry: expiry, failure: deployError), true))
+}
+
+@Test(arguments: [
+    (day - 1, true),
+    (day, true),
+    (day + 1, false),
+])
+func urgentNoticeAtOrUnderADayLeft(secondsLeft: TimeInterval, notifies: Bool) {
+    let expiresAt = now + secondsLeft
+    let result = AppHealth.failing(deployError).applying(.expiryChecked(expiresAt: expiresAt, now: now))
+    let expected: AppHealth = notifies ? .urgent(notifiedExpiry: expiresAt, failure: deployError) : .failing(deployError)
+    #expect(result == (expected, notifies))
+}
+
+@Test func urgentNoticeIsSentOncePerExpiry() {
+    let urgent = AppHealth.urgent(notifiedExpiry: expiry, failure: nil)
+    #expect(urgent.applying(.expiryChecked(expiresAt: expiry, now: now)) == (urgent, false))
+
+    let newExpiry = expiry + 3600
+    #expect(urgent.applying(.expiryChecked(expiresAt: newExpiry, now: now))
+        == (.urgent(notifiedExpiry: newExpiry, failure: nil), true))
 }

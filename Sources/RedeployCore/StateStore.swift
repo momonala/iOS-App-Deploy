@@ -1,13 +1,45 @@
 import Foundation
 
 public struct RunState: Codable, Sendable, Equatable {
-    public var lastError: String?
-    public var lastErrorAt: Date?
     public var lastLog: String?
-    public var failureNotified = false
-    public var urgentNotifiedExpiry: Date?
+    public var health: AppHealth
 
-    public init() {}
+    public init(lastLog: String? = nil, health: AppHealth = .healthy) {
+        self.lastLog = lastLog
+        self.health = health
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case lastError, lastErrorAt, lastLog, failureNotified, urgentNotifiedExpiry
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        lastLog = try container.decodeIfPresent(String.self, forKey: .lastLog)
+        let failure: Failure? = if let message = try container.decodeIfPresent(String.self, forKey: .lastError) {
+            .deployFailed(message: message, at: try container.decodeIfPresent(Date.self, forKey: .lastErrorAt) ?? .now)
+        } else if try container.decodeIfPresent(Bool.self, forKey: .failureNotified) == true {
+            .phoneUnreachable
+        } else {
+            nil
+        }
+        health = if let expiry = try container.decodeIfPresent(Date.self, forKey: .urgentNotifiedExpiry) {
+            .urgent(notifiedExpiry: expiry, failure: failure)
+        } else {
+            failure.map(AppHealth.failing) ?? .healthy
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(lastLog, forKey: .lastLog)
+        if case .deployFailed(let message, let at) = health.failure {
+            try container.encode(message, forKey: .lastError)
+            try container.encode(at, forKey: .lastErrorAt)
+        }
+        try container.encode(health.failure != nil, forKey: .failureNotified)
+        try container.encodeIfPresent(health.urgentNotifiedExpiry, forKey: .urgentNotifiedExpiry)
+    }
 }
 
 public struct PersistedState: Codable, Sendable, Equatable {

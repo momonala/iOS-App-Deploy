@@ -186,7 +186,11 @@ final class AppModel {
             let run = state.apps[app.id] ?? RunState()
             status.lastLog = run.lastLog.map { URL(fileURLWithPath: $0) }
             if !status.phase.isDeploying, status.phase != .waitingForPhone {
-                status.phase = run.lastError.map { .failed(message: $0, at: run.lastErrorAt ?? .now) } ?? .idle
+                status.phase = if case .deployFailed(let message, let at) = run.health.failure {
+                    .failed(message: message, at: at)
+                } else {
+                    .idle
+                }
             }
             return status
         }
@@ -313,12 +317,14 @@ final class AppModel {
         for app in due {
             guard phone.isConnected else {
                 setPhase(app.id, .waitingForPhone)
-                notifyFailureOnce(
-                    app.id,
-                    title: "\(app.config.name) needs a redeploy",
-                    body: "\(config.device.name) is not reachable. Retrying at next unlock.",
-                    log: nil
-                )
+                if record(.phoneUnreachable, for: app.id) {
+                    postFailure(
+                        app.id,
+                        title: "\(app.config.name) needs a redeploy",
+                        body: "\(config.device.name) is not reachable. Retrying at next unlock.",
+                        log: nil
+                    )
+                }
                 allSucceeded = false
                 continue
             }
@@ -383,14 +389,11 @@ final class AppModel {
         Paths.pruneLogs(for: id)
 
         let succeeded = exitStatus == 0
-        if succeeded {
-            var run = RunState()
-            run.lastLog = log.path
-            state.apps[id] = run
-        } else {
-            state.apps[id, default: RunState()].lastError = lastError ?? "deploy-ios.sh exited with status \(exitStatus)"
-            state.apps[id, default: RunState()].lastErrorAt = .now
-        }
+        let failureMessage = lastError ?? "deploy-ios.sh exited with status \(exitStatus)"
+        let notifyFailure = record(
+            succeeded ? .deploySucceeded : .deployFailed(message: failureMessage, at: .now),
+            for: id
+        )
         setPhase(id, .idle)
         reload()
         save()
@@ -404,36 +407,35 @@ final class AppModel {
                 body: "Good until \(expiry.map(Format.dateTime) ?? "unknown"). Took \(took).",
                 appID: id, log: log, icon: icon, isFailure: false
             )
-        } else {
-            notifyFailureOnce(
+        } else if notifyFailure {
+            postFailure(
                 id,
                 title: "\(app.name) deploy failed",
-                body: "\(Format.sentence(state.apps[id]?.lastError ?? "")). Retrying at next unlock.",
+                body: "\(Format.sentence(failureMessage)). Retrying at next unlock.",
                 log: log
             )
-            save()
         }
         return succeeded
     }
 
     // MARK: - Notifications
 
-    /// One notification per run of failures; a success resets it. Without this every unlock would
-    /// re-announce the same unreachable phone.
-    private func notifyFailureOnce(_ id: String, title: String, body: String, log: URL?) {
-        guard state.apps[id]?.failureNotified != true else { return }
-        state.apps[id, default: RunState()].failureNotified = true
+    private func record(_ event: AppHealth.Event, for id: String) -> Bool {
+        let current = state.apps[id]?.health ?? .healthy
+        let (health, notify) = current.applying(event)
+        if health != current { state.apps[id, default: RunState()].health = health }
+        return notify
+    }
+
+    private func postFailure(_ id: String, title: String, body: String, log: URL?) {
         let icon = index(of: id).flatMap { apps[$0].iconURL }
         notifier.post(title: title, body: body, appID: id, log: log, icon: icon, isFailure: true)
     }
 
     private func notifyUrgent() {
         for app in apps {
-            guard let expiry = app.expiresAt,
-                  Policy.isUrgent(expiresAt: expiry, now: .now),
-                  state.apps[app.id]?.urgentNotifiedExpiry != expiry
+            guard let expiry = app.expiresAt, record(.expiryChecked(expiresAt: expiry, now: .now), for: app.id)
             else { continue }
-            state.apps[app.id, default: RunState()].urgentNotifiedExpiry = expiry
             let remaining = Policy.remainingText(until: expiry, now: .now)
             notifier.post(
                 title: expiry <= .now ? "\(app.config.name) has expired" : "\(app.config.name) expires in \(remaining)",
