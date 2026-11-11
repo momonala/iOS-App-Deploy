@@ -54,9 +54,9 @@ struct PopoverView: View {
             Button("Deploy All") { Task { await model.deployAll() } }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .disabled(model.isChecking || model.isDeploying)
+                .disabled(model.run.isChecking || model.run.isDeploying)
                 .help("Redeploy every app now, regardless of time left")
-            if model.isChecking {
+            if model.run.isChecking {
                 ProgressView().controlSize(.small).frame(width: 24, height: 24)
             } else {
                 Button { Task { await model.check() } } label: {
@@ -152,8 +152,8 @@ struct PopoverView: View {
     }
 
     private var footerStatus: String {
-        if model.isDeploying { return "Deploying…" }
-        if model.isChecking { return "Checking…" }
+        if model.run.isDeploying { return "Deploying…" }
+        if model.run.isChecking { return "Checking…" }
         guard let last = model.state.lastCheck else { return "Not updated yet" }
         let failed = model.failedCount
         return "Updated \(Format.relativeDateTime(last))" + (failed > 0 ? " · \(failed) failed" : "")
@@ -401,7 +401,7 @@ private struct AppDetail: View {
                 let isFailed = if case .failed = app.phase { true } else { false }
                 Button(isFailed ? "Retry" : "Deploy Now") { Task { await model.deploy(app.id) } }
                     .buttonStyle(.borderedProminent)
-                    .disabled(model.isDeploying)
+                    .disabled(model.run.isDeploying)
                 Button("Open Log") { model.openLog(app.id) }
                     .disabled(app.lastLog == nil)
                 Button("Xcode") { model.openProject(app.id) }

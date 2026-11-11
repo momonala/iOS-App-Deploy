@@ -290,3 +290,78 @@ func urgentNoticeAtOrUnderADayLeft(secondsLeft: TimeInterval, notifies: Bool) {
     #expect(urgent.applying(.expiryChecked(expiresAt: newExpiry, now: now))
         == (.urgent(notifiedExpiry: newExpiry, failure: nil), true))
 }
+
+@Test(arguments: [
+    (Run.idle, Run.checking(deploying: nil)),
+    (.deploying(appID: "trace"), .checking(deploying: "trace")),
+])
+func checkStartsWhenNoBatchIsRunning(from run: Run, to expected: Run) {
+    #expect(run.applying(.check) == expected)
+}
+
+@Test(arguments: [Run.checking(deploying: nil), .checking(deploying: "trace"), .deployingAll(deploying: nil)])
+func checkIsRefusedDuringABatch(_ run: Run) {
+    #expect(run.applying(.check) == nil)
+}
+
+@Test func deployAllStartsOnlyWhenIdle() {
+    #expect(Run.idle.applying(.deployAll) == .deployingAll(deploying: nil))
+    for busy in [Run.deploying(appID: "trace"), .checking(deploying: nil), .deployingAll(deploying: nil)] {
+        #expect(busy.applying(.deployAll) == nil)
+    }
+}
+
+@Test(arguments: [
+    (Run.idle, Run.deploying(appID: "usc")),
+    (.checking(deploying: nil), .checking(deploying: "usc")),
+    (.deployingAll(deploying: nil), .deployingAll(deploying: "usc")),
+])
+func deployStartsWhenNothingElseIsDeploying(from run: Run, to expected: Run) {
+    #expect(run.applying(.deploy(appID: "usc")) == expected)
+}
+
+@Test(arguments: [Run.deploying(appID: "trace"), .checking(deploying: "trace"), .deployingAll(deploying: "trace")])
+func deployIsRefusedWhileAnotherDeploys(_ run: Run) {
+    #expect(run.applying(.deploy(appID: "usc")) == nil)
+}
+
+@Test(arguments: [
+    (Run.deploying(appID: "trace"), Run.idle),
+    (.checking(deploying: "trace"), .checking(deploying: nil)),
+    (.deployingAll(deploying: "trace"), .deployingAll(deploying: nil)),
+])
+func finishedDeployLeavesTheBatchRunning(from run: Run, to expected: Run) {
+    #expect(run.applying(.deployFinished) == expected)
+}
+
+@Test(arguments: [
+    (Run.checking(deploying: nil), Run.idle),
+    (.deployingAll(deploying: nil), .idle),
+    (.checking(deploying: "trace"), .deploying(appID: "trace")),
+    (.deployingAll(deploying: "trace"), .deploying(appID: "trace")),
+])
+func finishedBatchLeavesALoneDeployRunning(from run: Run, to expected: Run) {
+    #expect(run.applying(.batchFinished) == expected)
+}
+
+@Test func busyFlagsFollowTheRun() {
+    #expect(!Run.idle.isChecking && !Run.idle.isDeploying)
+    #expect(!Run.deploying(appID: "trace").isChecking && Run.deploying(appID: "trace").isDeploying)
+    #expect(Run.checking(deploying: nil).isChecking && !Run.checking(deploying: nil).isDeploying)
+    #expect(Run.deployingAll(deploying: "trace").isChecking && Run.deployingAll(deploying: "trace").isDeploying)
+}
+
+@Test(arguments: [
+    Phase.waitingForPhone,
+    .deploying(step: 2, total: 5, title: "Building", startedAt: now),
+])
+func reloadKeepsLivePhases(_ phase: Phase) {
+    #expect(phase.merging(persisted: deployError) == phase)
+}
+
+@Test(arguments: [Phase.idle, .failed(message: "older", at: now - day)])
+func reloadRedrawsSettledPhasesFromTheSavedFailure(_ phase: Phase) {
+    #expect(phase.merging(persisted: deployError) == .failed(message: "install failed", at: now))
+    #expect(phase.merging(persisted: .phoneUnreachable) == .idle)
+    #expect(phase.merging(persisted: nil) == .idle)
+}

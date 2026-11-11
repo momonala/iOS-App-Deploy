@@ -21,17 +21,6 @@ enum Phone: Equatable {
     }
 }
 
-enum Phase: Equatable {
-    case idle
-    case waitingForPhone
-    case deploying(step: Int, total: Int, title: String, startedAt: Date)
-    case failed(message: String, at: Date)
-
-    var isDeploying: Bool {
-        if case .deploying = self { true } else { false }
-    }
-}
-
 enum OnPhone: Equatable {
     case unknown, checking, installed(String), notInstalled, unavailable
 }
@@ -64,7 +53,7 @@ final class AppModel {
     private(set) var configError: String?
     private(set) var phone: Phone = .checking(lastKnown: nil)
     private(set) var apps: [AppStatus] = []
-    private(set) var isChecking = false
+    private(set) var run: Run = .idle
     private(set) var state: PersistedState
     private(set) var launchAtLogin = false
     private(set) var phoneDetails: PhoneDetails?
@@ -91,7 +80,6 @@ final class AppModel {
 
     var thresholdDays: Int? { config?.thresholdDays }
     var deviceName: String { config?.device.name ?? "Phone" }
-    var isDeploying: Bool { apps.contains { $0.phase.isDeploying } }
     var battery: BatterySnapshot? { state.battery }
     var installedProfiles: Reading<[InstalledProfile]>? { state.installedProfiles }
     var crashes: Reading<[CrashReport]>? { state.crashes }
@@ -102,7 +90,7 @@ final class AppModel {
     var failedCount: Int { apps.filter { if case .failed = $0.phase { true } else { false } }.count }
 
     var menuBarSymbol: String {
-        if isDeploying { return "iphone.and.arrow.forward" }
+        if run.isDeploying { return "iphone.and.arrow.forward" }
         let attention = configError != nil || apps.contains { app in
             switch app.phase {
             case .failed, .waitingForPhone: true
@@ -148,7 +136,7 @@ final class AppModel {
     /// Never cancels a check that is already running: cancelling its task would end the output
     /// stream, and that terminates the deploy script mid-install.
     private func scheduleAutomaticCheck(after delay: Duration) {
-        guard !isChecking else { return }
+        guard run.applying(.check) != nil else { return }
         pendingCheck?.cancel()
         pendingCheck = Task { [weak self] in
             try? await Task.sleep(for: delay)
@@ -183,15 +171,9 @@ final class AppModel {
             status.iconURL = Paths.icon(for: app)
             if status.icon == nil { status.icon = status.iconURL.flatMap(NSImage.init(contentsOf:)) }
 
-            let run = state.apps[app.id] ?? RunState()
-            status.lastLog = run.lastLog.map { URL(fileURLWithPath: $0) }
-            if !status.phase.isDeploying, status.phase != .waitingForPhone {
-                status.phase = if case .deployFailed(let message, let at) = run.health.failure {
-                    .failed(message: message, at: at)
-                } else {
-                    .idle
-                }
-            }
+            let saved = state.apps[app.id] ?? RunState()
+            status.lastLog = saved.lastLog.map { URL(fileURLWithPath: $0) }
+            status.phase = status.phase.merging(persisted: saved.health.failure)
             return status
         }
     }
@@ -199,7 +181,7 @@ final class AppModel {
     func refreshForDisplay() {
         reload()
         launchAtLogin = SMAppService.mainApp.status == .enabled
-        guard !isChecking else { return }
+        guard !run.isChecking else { return }
         Task { await refreshPhone() }
     }
 
@@ -299,9 +281,8 @@ final class AppModel {
     // MARK: - Checking and deploying
 
     func check() async {
-        guard !isChecking else { return }
-        isChecking = true
-        defer { isChecking = false }
+        guard transition(.check) else { return }
+        defer { transition(.batchFinished) }
 
         reload()
         guard let config else { return }
@@ -337,11 +318,9 @@ final class AppModel {
         save()
     }
 
-    /// Shares the checking flag so an unlock or the hourly timer can't start a check mid-way.
     func deployAll() async {
-        guard !isChecking, !isDeploying else { return }
-        isChecking = true
-        defer { isChecking = false }
+        guard transition(.deployAll) else { return }
+        defer { transition(.batchFinished) }
 
         reload()
         var allSucceeded = true
@@ -355,7 +334,7 @@ final class AppModel {
 
     @discardableResult
     func deploy(_ id: String) async -> Bool {
-        guard let index = index(of: id), !isDeploying else { return false }
+        guard let index = index(of: id), transition(.deploy(appID: id)) else { return false }
         let app = apps[index].config
         let log = Paths.newLog(for: id)
         let startedAt = Date.now
@@ -395,6 +374,7 @@ final class AppModel {
             for: id
         )
         setPhase(id, .idle)
+        transition(.deployFinished)
         reload()
         save()
 
@@ -506,6 +486,13 @@ final class AppModel {
     // MARK: - Helpers
 
     private func index(of id: String) -> Int? { apps.firstIndex { $0.id == id } }
+
+    @discardableResult
+    private func transition(_ event: Run.Event) -> Bool {
+        guard let next = run.applying(event) else { return false }
+        run = next
+        return true
+    }
 
     private func setPhase(_ id: String, _ phase: Phase) {
         guard let index = index(of: id) else { return }
