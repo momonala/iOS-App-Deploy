@@ -20,8 +20,15 @@ public struct Config: Codable, Sendable, Equatable {
 
         public var projectURL: URL { repoURL.appending(path: project) }
 
+        /// The Release or Debug build, whichever deploy-ios.sh produced last.
         public var builtAppURL: URL {
-            repoURL.appending(path: "build/DerivedData-device/Build/Products/Debug-iphoneos/\(scheme).app")
+            let products = repoURL.appending(path: "build/DerivedData-device/Build/Products")
+            let builds = ["Release", "Debug"].map { products.appending(path: "\($0)-iphoneos/\(scheme).app") }
+            func builtAt(_ app: URL) -> Date {
+                (try? app.appending(path: "Info.plist").resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? .distantPast
+            }
+            return builds.max { builtAt($0) < builtAt($1) } ?? builds[0]
         }
     }
 
