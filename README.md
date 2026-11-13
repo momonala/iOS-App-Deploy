@@ -7,7 +7,7 @@ It also owns the shared deploy script that both app repos call.
 ## Layout
 
 ```
-config.json              phone UDID, redeploy threshold, the apps
+config.json              phone UDID, redeploy threshold, the apps (gitignored; copy config.example.json)
 scripts/deploy-ios.sh    build + install one app; Trace and USC's scripts/deploy.sh are wrappers around it
 Sources/RedeployCore     pure logic: config, profile parsing, the schedule rules, script output parsing
 Sources/Redeploy         the SwiftUI menu bar app
