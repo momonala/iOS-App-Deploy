@@ -13,6 +13,7 @@ public struct Config: Codable, Sendable, Equatable {
         public let project: String
         public let scheme: String
         public let bundleId: String
+        public let product: String?
 
         public var repoURL: URL {
             URL(fileURLWithPath: (repo as NSString).expandingTildeInPath, isDirectory: true)
@@ -23,7 +24,7 @@ public struct Config: Codable, Sendable, Equatable {
         /// The Release or Debug build, whichever deploy-ios.sh produced last.
         public var builtAppURL: URL {
             let products = repoURL.appending(path: "build/DerivedData-device/Build/Products")
-            let builds = ["Release", "Debug"].map { products.appending(path: "\($0)-iphoneos/\(scheme).app") }
+            let builds = ["Release", "Debug"].map { products.appending(path: "\($0)-iphoneos/\(product ?? scheme).app") }
             func builtAt(_ app: URL) -> Date {
                 (try? app.appending(path: "Info.plist").resourceValues(forKeys: [.contentModificationDateKey]))?
                     .contentModificationDate ?? .distantPast

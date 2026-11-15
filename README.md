@@ -24,6 +24,18 @@ swift test         # RedeployCore tests
 
 The first launch asks for notification permission and registers a login item. Both stick across rebuilds only because `build.sh` signs with a stable identity. Ad-hoc signing gives every build a new identity, so macOS forgets both.
 
+## App entries
+
+Each app in `config.json` needs `id`, `name`, `repo`, `project`, `scheme` and `bundleId`. Three optional fields cover projects that aren't a plain app target, such as WebDriverAgent's test runner:
+
+| Field | Default | What |
+|-------|---------|------|
+| `product` | `scheme` | name of the built `.app`, e.g. `WebDriverAgentRunner-Runner` |
+| `buildAction` | `build` | xcodebuild action, e.g. `build-for-testing` |
+| `buildSettings` | none | extra `KEY=VALUE` settings, e.g. `DEVELOPMENT_TEAM` and `PRODUCT_BUNDLE_IDENTIFIER` for an upstream clone whose project still has someone else's IDs |
+
+For a test runner, `bundleId` is the installed one, which ends in `.xctrunner`.
+
 ## When it deploys
 
 - **Triggers:** app launch, wake from sleep, screen unlock, an hourly timer, and the refresh button. **Deploy All** skips the threshold and redeploys every app. Wake and unlock wait a few seconds first so Wi-Fi can reconnect.

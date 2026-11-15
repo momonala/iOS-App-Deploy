@@ -124,6 +124,12 @@ REPO_ROOT="${REPO_ROOT/#\~/$HOME}"
 PROJECT="$REPO_ROOT/$(app_field project)"
 SCHEME="$(app_field scheme)"
 BUNDLE_ID="$(app_field bundleId)"
+PRODUCT="$(jq -r --arg id "$APP_ID" '.apps[] | select(.id == $id) | .product // .scheme' "$CONFIG")"
+BUILD_ACTION="$(jq -r --arg id "$APP_ID" '.apps[] | select(.id == $id) | .buildAction // "build"' "$CONFIG")"
+EXTRA_SETTINGS=()
+while IFS= read -r setting; do
+    [[ -n "$setting" ]] && EXTRA_SETTINGS+=("$setting")
+done < <(jq -r --arg id "$APP_ID" '.apps[] | select(.id == $id) | .buildSettings // {} | to_entries[] | "\(.key)=\(.value)"' "$CONFIG")
 DERIVED_DATA="$REPO_ROOT/build/DerivedData-device"
 DEFAULT_DEVICE_NAME="$(jq -r '.device.name' "$CONFIG")"
 DEFAULT_DEVICE_UDID="$(jq -r '.device.udid' "$CONFIG")"
@@ -230,7 +236,7 @@ fi
 # 'generic/platform=iOS' rather than 'id=<udid>': the id form makes xcodebuild wait on device
 # preparation and it times out on a locked phone, even when install would have worked fine.
 BUILD_NUMBER="$(git -C "$REPO_ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
-info "xcodebuild $SCHEME ($CONFIGURATION) build $BUILD_NUMBER for generic/platform=iOS"
+info "xcodebuild $BUILD_ACTION $SCHEME ($CONFIGURATION) build $BUILD_NUMBER for generic/platform=iOS"
 if ! "$XCODEBUILD" \
         -project "$PROJECT" \
         -scheme "$SCHEME" \
@@ -239,7 +245,8 @@ if ! "$XCODEBUILD" \
         -derivedDataPath "$DERIVED_DATA" \
         -allowProvisioningUpdates \
         CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-        build >>"$LOG_FILE" 2>&1; then
+        ${EXTRA_SETTINGS[@]+"${EXTRA_SETTINGS[@]}"} \
+        "$BUILD_ACTION" >>"$LOG_FILE" 2>&1; then
     printf '\n'
     # Compiler diagnostics first — the tail of an xcodebuild log is almost never the useful part.
     if grep -qE 'error:' "$LOG_FILE"; then
@@ -255,7 +262,7 @@ if ! "$XCODEBUILD" \
     die "build failed"
 fi
 
-APP_PATH="$DERIVED_DATA/Build/Products/$CONFIGURATION-iphoneos/$SCHEME.app"
+APP_PATH="$DERIVED_DATA/Build/Products/$CONFIGURATION-iphoneos/$PRODUCT.app"
 [[ -d "$APP_PATH" ]] || die "build succeeded but $APP_PATH is missing"
 
 ok "built $(du -sh "$APP_PATH" | cut -f1 | tr -d ' ')"
