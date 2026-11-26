@@ -41,6 +41,8 @@ struct PopoverView: View {
         }
         .padding(Metrics.outer)
         .frame(width: Metrics.width)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(WindowHeightFitter())
         // MenuBarExtra keeps its window alive between openings, so onAppear does not fire on reopen.
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             model.refreshForDisplay()
@@ -586,5 +588,34 @@ private struct MonoText: View {
 
     var body: some View {
         Text(text).font(.system(size: Metrics.mono, design: .monospaced))
+    }
+}
+
+// MenuBarExtra's window grows to fit taller content but never shrinks back, so resize it to the
+// content height ourselves, keeping the top edge under the menu bar.
+private struct WindowHeightFitter: NSViewRepresentable {
+    func makeNSView(context: Context) -> FittingView { FittingView() }
+    func updateNSView(_ nsView: FittingView, context: Context) {}
+
+    final class FittingView: NSView {
+        override func layout() {
+            super.layout()
+            fitWindow()
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            fitWindow()
+        }
+
+        private func fitWindow() {
+            guard let window, bounds.height > 0 else { return }
+            let target = window.frameRect(forContentRect: NSRect(origin: .zero, size: bounds.size)).height
+            guard abs(window.frame.height - target) > 0.5 else { return }
+            var frame = window.frame
+            frame.origin.y += frame.height - target
+            frame.size.height = target
+            DispatchQueue.main.async { window.setFrame(frame, display: true) }
+        }
     }
 }
