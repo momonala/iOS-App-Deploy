@@ -290,12 +290,14 @@ final class AppModel {
         await refreshWiFiSync()
         await refreshCrashes()
 
-        var allSucceeded = true
         let due = apps.filter {
             Policy.needsDeploy(expiresAt: $0.expiresAt, now: .now, thresholdDays: config.thresholdDays)
         }
-        for app in due {
-            guard phone.isConnected else {
+        var allSucceeded = true
+        if phone.isConnected {
+            allSucceeded = await deployTogether(due.map(\.id))
+        } else {
+            for app in due {
                 setPhase(app.id, .waitingForPhone)
                 if record(.phoneUnreachable, for: app.id) {
                     postFailure(
@@ -306,9 +308,7 @@ final class AppModel {
                     )
                 }
                 allSucceeded = false
-                continue
             }
-            allSucceeded = await deploy(app.id) && allSucceeded
         }
 
         notifyUrgent()
@@ -322,13 +322,19 @@ final class AppModel {
         defer { transition(.batchFinished) }
 
         reload()
-        var allSucceeded = true
-        for app in apps {
-            allSucceeded = await deploy(app.id) && allSucceeded
-        }
+        let allSucceeded = await deployTogether(apps.map(\.id))
         state.lastCheck = .now
         if allSucceeded { state.lastSuccessfulCheck = .now }
         save()
+    }
+
+    private func deployTogether(_ ids: [String]) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            for id in ids { group.addTask { await self.deploy(id) } }
+            var allSucceeded = true
+            for await succeeded in group { allSucceeded = allSucceeded && succeeded }
+            return allSucceeded
+        }
     }
 
     @discardableResult
@@ -373,7 +379,7 @@ final class AppModel {
             for: id
         )
         setPhase(id, .idle)
-        transition(.deployFinished)
+        transition(.deployFinished(appID: id))
         reload()
         save()
 

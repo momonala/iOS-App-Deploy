@@ -292,63 +292,52 @@ func urgentNoticeAtOrUnderADayLeft(secondsLeft: TimeInterval, notifies: Bool) {
 }
 
 @Test(arguments: [
-    (Run.idle, Run.checking(deploying: nil)),
-    (.deploying(appID: "trace"), .checking(deploying: "trace")),
+    (Run.idle, Run(batch: .check)),
+    (Run(deploying: ["trace"]), Run(batch: .check, deploying: ["trace"])),
 ])
 func checkStartsWhenNoBatchIsRunning(from run: Run, to expected: Run) {
     #expect(run.applying(.check) == expected)
 }
 
-@Test(arguments: [Run.checking(deploying: nil), .checking(deploying: "trace"), .deployingAll(deploying: nil)])
+@Test(arguments: [Run(batch: .check), Run(batch: .check, deploying: ["trace"]), Run(batch: .deployAll)])
 func checkIsRefusedDuringABatch(_ run: Run) {
     #expect(run.applying(.check) == nil)
 }
 
 @Test func deployAllStartsOnlyWhenIdle() {
-    #expect(Run.idle.applying(.deployAll) == .deployingAll(deploying: nil))
-    for busy in [Run.deploying(appID: "trace"), .checking(deploying: nil), .deployingAll(deploying: nil)] {
+    #expect(Run.idle.applying(.deployAll) == Run(batch: .deployAll))
+    for busy in [Run(deploying: ["trace"]), Run(batch: .check), Run(batch: .deployAll)] {
         #expect(busy.applying(.deployAll) == nil)
     }
 }
 
 @Test(arguments: [
-    (Run.idle, Run.deploying(appID: "usc")),
-    (.checking(deploying: nil), .checking(deploying: "usc")),
-    (.deployingAll(deploying: nil), .deployingAll(deploying: "usc")),
+    (Run.idle, Run(deploying: ["usc"])),
+    (Run(batch: .check, deploying: ["trace"]), Run(batch: .check, deploying: ["trace", "usc"])),
+    (Run(batch: .deployAll, deploying: ["trace"]), Run(batch: .deployAll, deploying: ["trace", "usc"])),
 ])
-func deployStartsWhenNothingElseIsDeploying(from run: Run, to expected: Run) {
+func deploysOfDifferentAppsRunTogether(from run: Run, to expected: Run) {
     #expect(run.applying(.deploy(appID: "usc")) == expected)
 }
 
-@Test(arguments: [Run.deploying(appID: "trace"), .checking(deploying: "trace"), .deployingAll(deploying: "trace")])
-func deployIsRefusedWhileAnotherDeploys(_ run: Run) {
-    #expect(run.applying(.deploy(appID: "usc")) == nil)
+@Test func deployIsRefusedWhileTheSameAppDeploys() {
+    #expect(Run(batch: .deployAll, deploying: ["usc"]).applying(.deploy(appID: "usc")) == nil)
 }
 
-@Test(arguments: [
-    (Run.deploying(appID: "trace"), Run.idle),
-    (.checking(deploying: "trace"), .checking(deploying: nil)),
-    (.deployingAll(deploying: "trace"), .deployingAll(deploying: nil)),
-])
-func finishedDeployLeavesTheBatchRunning(from run: Run, to expected: Run) {
-    #expect(run.applying(.deployFinished) == expected)
+@Test func finishedDeployLeavesTheBatchAndOtherDeploysRunning() {
+    let run = Run(batch: .deployAll, deploying: ["trace", "usc"])
+    #expect(run.applying(.deployFinished(appID: "trace")) == Run(batch: .deployAll, deploying: ["usc"]))
 }
 
-@Test(arguments: [
-    (Run.checking(deploying: nil), Run.idle),
-    (.deployingAll(deploying: nil), .idle),
-    (.checking(deploying: "trace"), .deploying(appID: "trace")),
-    (.deployingAll(deploying: "trace"), .deploying(appID: "trace")),
-])
-func finishedBatchLeavesALoneDeployRunning(from run: Run, to expected: Run) {
-    #expect(run.applying(.batchFinished) == expected)
+@Test func finishedBatchLeavesLoneDeploysRunning() {
+    #expect(Run(batch: .check, deploying: ["trace"]).applying(.batchFinished) == Run(deploying: ["trace"]))
 }
 
 @Test func busyFlagsFollowTheRun() {
     #expect(!Run.idle.isChecking && !Run.idle.isDeploying)
-    #expect(!Run.deploying(appID: "trace").isChecking && Run.deploying(appID: "trace").isDeploying)
-    #expect(Run.checking(deploying: nil).isChecking && !Run.checking(deploying: nil).isDeploying)
-    #expect(Run.deployingAll(deploying: "trace").isChecking && Run.deployingAll(deploying: "trace").isDeploying)
+    #expect(!Run(deploying: ["trace"]).isChecking && Run(deploying: ["trace"]).isDeploying)
+    #expect(Run(batch: .check).isChecking && !Run(batch: .check).isDeploying)
+    #expect(Run(batch: .deployAll, deploying: ["trace"]).isChecking)
 }
 
 @Test(arguments: [

@@ -66,9 +66,9 @@ ${BOLD}options${RESET}
 ${BOLD}steps${RESET}
   find the device, clear provisioning profiles, build, install, launch, check certificate expiry
 
-Clearing profiles and the expiry check shell out to cert-exp: profiles are cleared before the build
-so Xcode fetches fresh ones, then the new expiry dates are recorded afterwards. Either failing aborts
-the deploy. A successful install is recorded in $INSTALLED_DIR,
+Clearing profiles and the expiry check shell out to cert-exp: this app's profiles are cleared
+before the build so Xcode fetches fresh ones, then the new expiry dates are recorded afterwards.
+Either failing aborts the deploy. A successful install is recorded in $INSTALLED_DIR,
 which is where the iOS App Deploy menu bar app reads expiry dates from.
 
 ${BOLD}environment${RESET}
@@ -217,10 +217,10 @@ detail "took $(elapsed "$device_start")"
 
 if [[ "$CERTS" == true ]]; then
     step "Clearing provisioning profiles"
-    # Emptied before the build so -allowProvisioningUpdates fetches fresh profiles rather than
-    # reusing a stale one that is about to expire.
-    detail "cert-exp clear"
-    cert_exp clear
+    # Cleared before the build so -allowProvisioningUpdates fetches a fresh profile rather than
+    # reusing a stale one that is about to expire. Only this app's, so other deploys can run alongside.
+    detail "cert-exp clear --bundle-id $BUNDLE_ID"
+    cert_exp clear --bundle-id "$BUNDLE_ID"
 fi
 
 # ---------------------------------------------------------------------------- build

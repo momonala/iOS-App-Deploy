@@ -41,7 +41,7 @@ For a test runner, `bundleId` is the installed one, which ends in `.xctrunner`.
 - **Triggers:** app launch, wake from sleep, screen unlock, an hourly timer, and the refresh button. **Deploy All** skips the threshold and redeploys every app. Wake and unlock wait a few seconds first so Wi-Fi can reconnect.
 - **Once a day:** automatic triggers are skipped once a check has *succeeded* today. A failed check doesn't count, so the next unlock or the next hour tries again. The refresh button ignores this.
 - **Threshold:** an app redeploys when its profile has `thresholdDays` (in `config.json`) or fewer days left. The threshold is also the longest stretch without opening the Mac that I can survive.
-- **One at a time,** always with `--no-launch`, so the app never pops open on the phone.
+- **All at once:** a check or Deploy All starts every due app's deploy together, always with `--no-launch`, so the app never pops open on the phone. Each deploy clears only its own app's profiles (`cert-exp clear --bundle-id`), so they don't delete each other's.
 
 ## Where the expiry date comes from
 
